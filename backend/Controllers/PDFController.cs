@@ -39,6 +39,9 @@ namespace backend.Controllers
             }
             catch (Exception ex)
             {
+                // Log the full exception details for debugging
+                Console.WriteLine($"PDF Generation Error: {ex}");
+                Console.WriteLine($"Inner Exception: {ex.InnerException}");
                 return StatusCode(500, $"Error generating PDF: {ex.Message}");
             }
         }
