@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using backend.Data;
 using backend.Models;
+using backend.Utils;
 
 namespace backend.Controllers
 {
@@ -38,7 +39,7 @@ namespace backend.Controllers
                         Title = "Senior Software Engineer",
                         Organization = "Tech Corp",
                         Subtitle = "Full-Stack Development",
-                        StartDate = new DateTime(2022, 1, 1),
+                        StartDate = DateTimeExtensions.UtcDate(2022, 1, 1),
                         EndDate = null,
                         IsCurrentPosition = true,
                         Description = "Leading development of enterprise web applications using .NET Core and React.",
@@ -56,8 +57,8 @@ namespace backend.Controllers
                         Title = "Software Developer",
                         Organization = "Startup Inc",
                         Subtitle = "Backend Development",
-                        StartDate = new DateTime(2020, 6, 1),
-                        EndDate = new DateTime(2021, 12, 31),
+                        StartDate = DateTimeExtensions.UtcDate(2020, 6, 1),
+                        EndDate = DateTimeExtensions.UtcDate(2021, 12, 31),
                         Description = "Built scalable backend services using .NET and PostgreSQL.",
                         BulletPoints = new List<string>
                         {
@@ -72,8 +73,8 @@ namespace backend.Controllers
                         Title = "Bachelor of Science in Computer Science",
                         Organization = "University of Technology",
                         Subtitle = "Computer Science",
-                        StartDate = new DateTime(2016, 9, 1),
-                        EndDate = new DateTime(2020, 5, 31),
+                        StartDate = DateTimeExtensions.UtcDate(2016, 9, 1),
+                        EndDate = DateTimeExtensions.UtcDate(2020, 5, 31),
                         Grade = "3.8/4.0",
                         GraduationYear = 2020
                     },
@@ -82,8 +83,8 @@ namespace backend.Controllers
                         Type = TimelineItemType.Project,
                         Title = "E-commerce Platform",
                         Organization = "Personal Project",
-                        StartDate = new DateTime(2021, 3, 1),
-                        EndDate = new DateTime(2021, 8, 31),
+                        StartDate = DateTimeExtensions.UtcDate(2021, 3, 1),
+                        EndDate = DateTimeExtensions.UtcDate(2021, 8, 31),
                         Description = "Full-stack e-commerce application with payment integration.",
                         Tech = ".NET Core, React, PostgreSQL, Stripe",
                         BulletPoints = new List<string>
@@ -125,19 +126,31 @@ namespace backend.Controllers
             return CreatedAtAction(nameof(GetSampleCV), new { id = cv.Id }, cv);
         }
 
-        [HttpGet("sample-cv/{id:int}")]
-        public async Task<ActionResult<CV>> GetSampleCV(int id)
+        [HttpGet("get-sample-cv")]
+        public async Task<ActionResult<CV>> GetSampleCV()
         {
             var cv = await _db.CVs
                 .Include(cv => cv.PersonalInfo)
                 .Include(cv => cv.TimelineItems)
                 .Include(cv => cv.Skills)
-                .FirstOrDefaultAsync(cv => cv.Id == id);
+                .FirstOrDefaultAsync();
 
             if (cv == null)
                 return NotFound();
 
             return cv;
+        }
+
+        [HttpGet("list-cvs")]
+        public async Task<ActionResult<IEnumerable<CV>>> ListCVs()
+        {
+            var cvs = await _db.CVs
+                .Include(cv => cv.PersonalInfo)
+                .Include(cv => cv.TimelineItems)
+                .Include(cv => cv.Skills)
+                .ToListAsync();
+
+            return cvs;
         }
     }
 }

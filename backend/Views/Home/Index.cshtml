@@ -3,6 +3,130 @@
 }
 
 <div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+    <h1 class="display-4">Welcome to CV App</h1>
+    <p>A .NET application for managing and generating CVs with AI assistance.</p>
 </div>
+
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5>CV Management</h5>
+            </div>
+            <div class="card-body">
+                <button class="btn btn-primary mb-2 w-100" onclick="createSampleCV()">Create Sample CV</button>
+                <button class="btn btn-info mb-2 w-100" onclick="getSampleCV()">Get Sample CV</button>
+                <button class="btn btn-secondary mb-2 w-100" onclick="listAllCVs()">List All CVs</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5>PDF Generation</h5>
+            </div>
+            <div class="card-body">
+                <button class="btn btn-success mb-2 w-100" onclick="generatePDF()">Generate PDF</button>
+                <button class="btn btn-warning mb-2 w-100" onclick="previewCV()">Preview CV Data</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>API Response</h5>
+            </div>
+            <div class="card-body">
+                <pre id="apiResponse" class="bg-light p-3 rounded"
+                    style="max-height: 400px; overflow-y: auto;">Click a button above to see the API response...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function createSampleCV() {
+        try {
+            const response = await fetch('/api/Test/create-sample-cv', { method: 'POST' });
+            const data = await response.json();
+            displayResponse('Create Sample CV Response:', data);
+        } catch (error) {
+            displayResponse('Error:', { error: error.message });
+        }
+    }
+
+    async function getSampleCV() {
+        try {
+            const response = await fetch('/api/Test/get-sample-cv');
+            const data = await response.json();
+            displayResponse('Get Sample CV Response:', data);
+        } catch (error) {
+            displayResponse('Error:', { error: error.message });
+        }
+    }
+
+    async function listAllCVs() {
+        try {
+            const response = await fetch('/api/Test/list-cvs');
+            const data = await response.json();
+            displayResponse('List All CVs Response:', data);
+        } catch (error) {
+            displayResponse('Error:', { error: error.message });
+        }
+    }
+
+    async function generatePDF() {
+        try {
+            const response = await fetch('/api/Test/get-sample-cv');
+            const cv = await response.json();
+
+            if (cv && cv.id) {
+                const pdfResponse = await fetch(`/api/PDF/${cv.id}/generate`);
+                if (pdfResponse.ok) {
+                    const blob = await pdfResponse.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `CV_${cv.personalInfo?.firstName || 'Sample'}_${cv.personalInfo?.lastName || 'CV'}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    displayResponse('PDF Generated Successfully:', { message: 'PDF downloaded successfully!' });
+                } else {
+                    displayResponse('PDF Generation Error:', { error: 'Failed to generate PDF' });
+                }
+            } else {
+                displayResponse('Error:', { error: 'No CV found to generate PDF from' });
+            }
+        } catch (error) {
+            displayResponse('Error:', { error: error.message });
+        }
+    }
+
+    async function previewCV() {
+        try {
+            const response = await fetch('/api/Test/get-sample-cv');
+            const cv = await response.json();
+
+            if (cv && cv.id) {
+                const previewResponse = await fetch(`/api/PDF/${cv.id}/preview`);
+                const data = await previewResponse.json();
+                displayResponse('CV Preview Response:', data);
+            } else {
+                displayResponse('Error:', { error: 'No CV found to preview' });
+            }
+        } catch (error) {
+            displayResponse('Error:', { error: error.message });
+        }
+    }
+
+    function displayResponse(title, data) {
+        const responseElement = document.getElementById('apiResponse');
+        responseElement.innerHTML = `<strong>${title}</strong>\n${JSON.stringify(data, null, 2)}`;
+    }
+</script>

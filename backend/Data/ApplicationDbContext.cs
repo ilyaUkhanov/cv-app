@@ -109,5 +109,58 @@ namespace backend.Data
                 .WithMany()
                 .UsingEntity(j => j.ToTable("SkillsTimelineItems"));
         }
+
+        public override int SaveChanges()
+        {
+            ConvertDateTimesToUtc();
+            return base.SaveChanges();
+        }
+
+        public override int SaveChanges(bool acceptAllChangesOnSuccess)
+        {
+            ConvertDateTimesToUtc();
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            ConvertDateTimesToUtc();
+            return base.SaveChangesAsync(cancellationToken);
+        }
+
+        public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        {
+            ConvertDateTimesToUtc();
+            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+
+        private void ConvertDateTimesToUtc()
+        {
+            var entries = ChangeTracker.Entries()
+                .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified);
+
+            foreach (var entry in entries)
+            {
+                foreach (var property in entry.Properties)
+                {
+                    if (property.Metadata.ClrType == typeof(DateTime) && property.CurrentValue != null)
+                    {
+                        var dateTime = (DateTime)property.CurrentValue;
+                        if (dateTime.Kind != DateTimeKind.Utc)
+                        {
+                            property.CurrentValue = DateTime.SpecifyKind(dateTime, DateTimeKind.Utc);
+                        }
+                    }
+                    else if (property.Metadata.ClrType == typeof(DateTime?) && property.CurrentValue != null)
+                    {
+                        var dateTime = (DateTime?)property.CurrentValue;
+                        if (dateTime.HasValue && dateTime.Value.Kind != DateTimeKind.Utc)
+                        {
+                            property.CurrentValue = DateTime.SpecifyKind(dateTime.Value, DateTimeKind.Utc);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
