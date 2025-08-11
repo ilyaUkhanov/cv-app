@@ -8,6 +8,7 @@ using iText.IO.Image;
 using iText.Kernel.Geom;
 using iText.Kernel.Font;
 using iText.IO.Font;
+using System.Linq;
 
 namespace backend.Services
 {
@@ -30,259 +31,324 @@ namespace backend.Services
             var pdf = new PdfDocument(writer);
             var document = new Document(pdf, PageSize.A4);
 
-            // Set margins for ATS compatibility
-            document.SetMargins(50, 50, 50, 50);
+            // Margins (kept generous for ATS)
+            document.SetMargins(42, 50, 50, 50);
 
-            // Header with Personal Info
-            AddHeader(document, cv.PersonalInfo, photoData);
-
-            // Summary
-            if (!string.IsNullOrEmpty(cv.PersonalInfo.Summary))
+            // Optional: register a readable sans-serif font (falls back to default if not found)
+            try
             {
-                AddSection(document, "PROFESSIONAL SUMMARY", cv.PersonalInfo.Summary);
+                var font = PdfFontFactory.CreateFont("Helvetica");
+                document.SetFont(font);
+            }
+            catch { /* fallback to default */ }
+
+            // ===== HEADER =====
+            AddHeaderBanner(document, cv.PersonalInfo, photoData);
+
+            // ===== SUMMARY (accroche) =====
+            if (!string.IsNullOrWhiteSpace(cv.PersonalInfo.Summary))
+            {
+                AddSectionTitle(document, "Résumé professionnel");
+                document.Add(new Paragraph(cv.PersonalInfo.Summary)
+                    .SetFontSize(11)
+                    .SetMarginBottom(12));
             }
 
-            // Skills
-            if (cv.Skills.Any())
+            // ===== EXPÉRIENCE =====
+            var experiences = cv.TimelineItems
+                .Where(t => t.Type == TimelineItemType.Experience)
+                .OrderByDescending(t => t.StartDate ?? DateTime.MinValue)
+                .ToList();
+
+            if (experiences.Any())
             {
-                AddSkillsSection(document, cv.Skills);
+                AddSectionTitle(document, "Expérience professionnelle");
+                foreach (var exp in experiences)
+                {
+                    AddExperienceBlock(document, exp, cv.Skills);
+                }
             }
 
-            // Timeline Items (Experience, Education, Projects)
-            if (cv.TimelineItems.Any())
+            // ===== PROJETS =====
+            var projects = cv.TimelineItems
+                .Where(t => t.Type == TimelineItemType.Project)
+                .OrderByDescending(t => t.StartDate ?? DateTime.MinValue)
+                .ToList();
+
+            if (projects.Any())
             {
-                AddTimelineSection(document, cv.TimelineItems);
+                AddSectionTitle(document, "Projets");
+                foreach (var p in projects)
+                {
+                    AddProjectBlock(document, p);
+                }
+            }
+
+            // ===== FORMATION =====
+            var educ = cv.TimelineItems
+                .Where(t => t.Type == TimelineItemType.Education)
+                .OrderByDescending(t => t.GraduationYear ?? (t.EndDate?.Year ?? (t.StartDate?.Year ?? int.MinValue)))
+                .ToList();
+
+            if (educ.Any())
+            {
+                AddSectionTitle(document, "Formation");
+                foreach (var ed in educ)
+                {
+                    AddEducationBlock(document, ed);
+                }
             }
 
             document.Close();
             return memoryStream.ToArray();
         }
 
-        private void AddHeader(Document document, PersonalInfo personalInfo, byte[]? photoData)
+        // ===== Header (Template-like) =====
+        private void AddHeaderBanner(Document document, PersonalInfo info, byte[]? photoData)
         {
-            // Name as main heading
-            var nameParagraph = new Paragraph(personalInfo.Name)
-                .SetFontSize(24)
-                .SetTextAlignment(TextAlignment.CENTER);
-            document.Add(nameParagraph);
+            // Top role title (fixed label – adapt as needed from data)
+            document.Add(new Paragraph("DÉVELOPPEUR FULLSTACK")
+                .SetFontSize(14)
+                .SetTextAlignment(TextAlignment.LEFT)
+                .SetMarginBottom(2));
 
-            // Contact information
-            var contactText = BuildContactText(personalInfo);
-            var contactParagraph = new Paragraph(contactText)
-                .SetFontSize(12)
-                .SetTextAlignment(TextAlignment.CENTER);
-            document.Add(contactParagraph);
+            // Name big
+            document.Add(new Paragraph(info.Name)
+                .SetFontSize(22)
+                .SetTextAlignment(TextAlignment.LEFT)
+                .SetMarginBottom(8));
 
-            // Add photo if provided (small size, right-aligned)
+            // First contact line: city | email
+            var line1 = new List<string>();
+            if (!string.IsNullOrWhiteSpace(info.Location)) line1.Add(info.Location!);
+            if (!string.IsNullOrWhiteSpace(info.Email)) line1.Add(info.Email!);
+            if (line1.Count > 0)
+            {
+                document.Add(new Paragraph(string.Join("  |  ", line1))
+                    .SetFontSize(10)
+                    .SetTextAlignment(TextAlignment.LEFT)
+                    .SetMarginBottom(2));
+            }
+
+            // Second contact line: website (use LinkedIn if no website) | LinkedIn | phone
+            var line2 = new List<string>();
+            // If you have a Website field later, insert it here. For now we print LinkedIn only once.
+            if (!string.IsNullOrWhiteSpace(info.LinkedIn)) line2.Add(info.LinkedIn!);
+            if (!string.IsNullOrWhiteSpace(info.Phone)) line2.Add(info.Phone!);
+
+            if (line2.Count > 0)
+            {
+                document.Add(new Paragraph(string.Join("  |  ", line2))
+                    .SetFontSize(10)
+                    .SetTextAlignment(TextAlignment.LEFT)
+                    .SetMarginBottom(12));
+            }
+
+            // Optional small photo at the right (kept same as your previous version but placed using float)
             if (photoData != null)
             {
                 try
                 {
                     var imageData = ImageDataFactory.Create(photoData);
-                    var image = new Image(imageData);
-                    image.SetWidth(80);
-                    image.SetHeight(100);
-                    image.SetFixedPosition(450, 700); // Position on the right side
+                    var image = new Image(imageData)
+                        .SetWidth(70)
+                        .SetHeight(88)
+                        .SetHorizontalAlignment(HorizontalAlignment.RIGHT);
                     document.Add(image);
                 }
-                catch
-                {
-                    // Silently fail if photo can't be added - ATS compatibility is priority
-                }
+                catch { /* ignore on failure for ATS simplicity */ }
             }
 
-            document.Add(new Paragraph("").SetMarginBottom(20));
+            AddDivider(document);
         }
 
-        private string BuildContactText(PersonalInfo personalInfo)
+        // ===== Blocks =====
+        private void AddExperienceBlock(Document document, TimelineItem item, List<Skills> allSkills)
         {
-            var contactParts = new List<string>();
+            // Title line: "Rôle | chez ORG | Mois/Année – Présent"
+            var titleParts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(item.Title)) titleParts.Add(item.Title!);
+            if (!string.IsNullOrWhiteSpace(item.Organization)) titleParts.Add($"chez {item.Organization}");
+            var period = BuildPeriod(item);
+            if (!string.IsNullOrWhiteSpace(period)) titleParts.Add(period);
 
-            if (!string.IsNullOrEmpty(personalInfo.Email))
-                contactParts.Add(personalInfo.Email);
-
-            if (!string.IsNullOrEmpty(personalInfo.Phone))
-                contactParts.Add(personalInfo.Phone);
-
-            if (!string.IsNullOrEmpty(personalInfo.Location))
-                contactParts.Add(personalInfo.Location);
-
-            if (!string.IsNullOrEmpty(personalInfo.LinkedIn))
-                contactParts.Add(personalInfo.LinkedIn);
-
-            return string.Join(" | ", contactParts);
-        }
-
-        private void AddSection(Document document, string title, string content)
-        {
-            // Section title
-            var titleParagraph = new Paragraph(title)
-                .SetFontSize(14)
-                .SetUnderline()
-                .SetMarginTop(15)
-                .SetMarginBottom(10);
-            document.Add(titleParagraph);
-
-            // Section content
-            var contentParagraph = new Paragraph(content)
-                .SetFontSize(11)
-                .SetMarginBottom(15);
-            document.Add(contentParagraph);
-        }
-
-        private void AddSkillsSection(Document document, List<Skills> skills)
-        {
-            var titleParagraph = new Paragraph("SKILLS")
-                .SetFontSize(14)
-                .SetUnderline()
-                .SetMarginTop(15)
-                .SetMarginBottom(10);
-            document.Add(titleParagraph);
-
-            foreach (var skillGroup in skills)
-            {
-                var categoryParagraph = new Paragraph(skillGroup.Category)
-                    .SetFontSize(12)
-                    .SetMarginTop(10)
-                    .SetMarginBottom(5);
-                document.Add(categoryParagraph);
-
-                var skillsText = string.Join(", ", skillGroup.SkillsList);
-                var skillsParagraph = new Paragraph(skillsText)
-                    .SetFontSize(11)
-                    .SetMarginBottom(10);
-                document.Add(skillsParagraph);
-            }
-        }
-
-        private void AddTimelineSection(Document document, List<TimelineItem> timelineItems)
-        {
-            var titleParagraph = new Paragraph("PROFESSIONAL EXPERIENCE & EDUCATION")
-                .SetFontSize(14)
-                .SetUnderline()
-                .SetMarginTop(15)
-                .SetMarginBottom(10);
-            document.Add(titleParagraph);
-
-            // Group by type and sort by date
-            var groupedItems = timelineItems
-                .GroupBy(t => t.Type)
-                .OrderBy(g => g.Key == TimelineItemType.Education ? 1 : 0)
-                .ThenBy(g => g.Key == TimelineItemType.Experience ? 0 : 1);
-
-            foreach (var group in groupedItems)
-            {
-                var groupTitle = group.Key switch
-                {
-                    TimelineItemType.Experience => "WORK EXPERIENCE",
-                    TimelineItemType.Education => "EDUCATION",
-                    TimelineItemType.Project => "PROJECTS",
-                    _ => "OTHER"
-                };
-
-                var groupTitleParagraph = new Paragraph(groupTitle)
-                    .SetFontSize(13)
-                    .SetMarginTop(15)
-                    .SetMarginBottom(10);
-                document.Add(groupTitleParagraph);
-
-                foreach (var item in group.OrderByDescending(t => t.StartDate ?? DateTime.MinValue))
-                {
-                    AddTimelineItem(document, item);
-                }
-            }
-        }
-
-        private void AddTimelineItem(Document document, TimelineItem item)
-        {
-            // Title and Organization
-            var titleOrgParagraph = new Paragraph($"{item.Title} - {item.Organization}")
+            document.Add(new Paragraph(string.Join("  |  ", titleParts))
                 .SetFontSize(12)
-                .SetMarginTop(10)
-                .SetMarginBottom(5);
-            document.Add(titleOrgParagraph);
+                .SetMarginTop(6)
+                .SetMarginBottom(4));
 
-            // Subtitle if exists
-            if (!string.IsNullOrEmpty(item.Subtitle))
+            // Optional subtitle
+            if (!string.IsNullOrWhiteSpace(item.Subtitle))
             {
-                var subtitleParagraph = new Paragraph(item.Subtitle)
+                document.Add(new Paragraph(item.Subtitle)
                     .SetFontSize(11)
-                    .SetMarginBottom(5);
-                document.Add(subtitleParagraph);
-            }
-
-            // Duration/Date
-            var durationText = GetDurationText(item);
-            if (!string.IsNullOrEmpty(durationText))
-            {
-                var durationParagraph = new Paragraph(durationText)
-                    .SetFontSize(11)
-                    .SetMarginBottom(5);
-                document.Add(durationParagraph);
+                    .SetMarginBottom(4));
             }
 
             // Description
-            if (!string.IsNullOrEmpty(item.Description))
+            if (!string.IsNullOrWhiteSpace(item.Description))
             {
-                var descriptionParagraph = new Paragraph(item.Description)
+                document.Add(new Paragraph(item.Description)
                     .SetFontSize(11)
-                    .SetMarginBottom(5);
-                document.Add(descriptionParagraph);
+                    .SetMarginBottom(4));
             }
 
-            // Tech stack for projects
-            if (item.Type == TimelineItemType.Project && !string.IsNullOrEmpty(item.Tech))
+            // Bullets
+            if (item.BulletPoints != null && item.BulletPoints.Any())
             {
-                var techParagraph = new Paragraph($"Technologies: {item.Tech}")
-                    .SetFontSize(10)
-                    .SetMarginBottom(5);
-                document.Add(techParagraph);
-            }
-
-            // Bullet points
-            if (item.BulletPoints.Any())
-            {
-                foreach (var bullet in item.BulletPoints)
+                foreach (var b in item.BulletPoints)
                 {
-                    var bulletParagraph = new Paragraph($"• {bullet}")
+                    if (string.IsNullOrWhiteSpace(b)) continue;
+                    document.Add(new Paragraph("• " + b)
                         .SetFontSize(11)
-                        .SetMarginLeft(20)
-                        .SetMarginBottom(3);
-                    document.Add(bulletParagraph);
+                        .SetMarginLeft(12)
+                        .SetMarginBottom(2));
                 }
             }
 
-            // Grade for education
-            if (item.Type == TimelineItemType.Education && !string.IsNullOrEmpty(item.Grade))
-            {
-                var gradeParagraph = new Paragraph($"Grade: {item.Grade}")
-                    .SetFontSize(11)
-                    .SetMarginBottom(5);
-                document.Add(gradeParagraph);
-            }
+            // Per-role skills (from many-to-many mapping)
+            var related = allSkills
+                .Where(s => s.RelatedTimelineItems != null && s.RelatedTimelineItems.Any(r => r.Id == item.Id))
+                .ToList();
 
-            document.Add(new Paragraph("").SetMarginBottom(10));
+            if (related.Any())
+            {
+                // A compact single line per category similar to the template
+                document.Add(new Paragraph("Compétences")
+                    .SetFontSize(11)
+                    .SetMarginTop(6)
+                    .SetMarginBottom(2));
+
+                foreach (var group in related)
+                {
+                    var skillsText = (group.SkillsList != null && group.SkillsList.Any())
+                        ? string.Join(", ", group.SkillsList)
+                        : string.Empty;
+
+                    document.Add(new Paragraph(skillsText)
+                        .SetFontSize(10)
+                        .SetMarginLeft(12)
+                        .SetMarginBottom(2));
+                }
+            }
         }
 
-        private string GetDurationText(TimelineItem item)
+        private void AddProjectBlock(Document document, TimelineItem item)
         {
-            if (item.StartDate.HasValue && item.EndDate.HasValue)
+            // Title line: project name; use organization if present for context
+            var title = !string.IsNullOrWhiteSpace(item.Title) ? item.Title : "Projet";
+            var ctx = !string.IsNullOrWhiteSpace(item.Organization) ? $" – {item.Organization}" : string.Empty;
+            document.Add(new Paragraph(title + ctx)
+                .SetFontSize(12)
+                .SetMarginTop(6)
+                .SetMarginBottom(2));
+
+            if (!string.IsNullOrWhiteSpace(item.Description))
             {
-                var startYear = item.StartDate.Value.Year;
-                var endYear = item.EndDate.Value.Year;
-
-                if (item.IsCurrentPosition)
-                    return $"{startYear} - Present";
-
-                return startYear == endYear ? $"{startYear}" : $"{startYear} - {endYear}";
+                document.Add(new Paragraph(item.Description)
+                    .SetFontSize(11)
+                    .SetMarginBottom(2));
             }
 
-            if (!string.IsNullOrEmpty(item.Duration))
-                return item.Duration;
+            if (!string.IsNullOrWhiteSpace(item.Tech))
+            {
+                document.Add(new Paragraph("Technologies : " + item.Tech)
+                    .SetFontSize(10)
+                    .SetMarginBottom(4));
+            }
+        }
 
-            if (item.GraduationYear.HasValue)
-                return $"Graduated {item.GraduationYear}";
+        private void AddEducationBlock(Document document, TimelineItem item)
+        {
+            // "Diplôme | École | Années" style
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(item.Title)) parts.Add(item.Title!);
+            if (!string.IsNullOrWhiteSpace(item.Organization)) parts.Add(item.Organization!);
 
+            var years = string.Empty;
+            if (item.GraduationYear.HasValue) years = item.GraduationYear.Value.ToString();
+            else if (item.StartDate.HasValue || item.EndDate.HasValue) years = BuildYears(item.StartDate, item.EndDate);
+            if (!string.IsNullOrWhiteSpace(years)) parts.Add(years);
+
+            document.Add(new Paragraph(string.Join("  |  ", parts))
+                .SetFontSize(12)
+                .SetMarginTop(6)
+                .SetMarginBottom(2));
+
+            if (!string.IsNullOrWhiteSpace(item.Subtitle))
+            {
+                document.Add(new Paragraph(item.Subtitle)
+                    .SetFontSize(11)
+                    .SetMarginBottom(2));
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Grade))
+            {
+                document.Add(new Paragraph("Mention : " + item.Grade)
+                    .SetFontSize(10)
+                    .SetMarginBottom(2));
+            }
+        }
+
+        // ===== Helpers =====
+        private void AddSectionTitle(Document document, string title)
+        {
+            document.Add(new Paragraph(title.ToUpperInvariant())
+                .SetFontSize(13)
+                .SetMarginTop(14)
+                .SetMarginBottom(6));
+            AddDivider(document);
+        }
+
+        private void AddDivider(Document document)
+        {
+            var sep = new LineSeparator(new iText.Kernel.Pdf.Canvas.Draw.SolidLine(0.75f));
+            sep.SetMarginBottom(10);
+            document.Add(sep);
+        }
+
+        private static string BuildPeriod(TimelineItem item)
+        {
+            // Preferred: Month YYYY – Month YYYY (or Présent)
+            if (item.StartDate.HasValue)
+            {
+                var start = item.StartDate.Value.ToString("MMMM yyyy");
+                string end;
+                if (item.IsCurrentPosition)
+                {
+                    end = "Présent";
+                }
+                else if (item.EndDate.HasValue)
+                {
+                    end = item.EndDate.Value.ToString("MMMM yyyy");
+                }
+                else if (!string.IsNullOrWhiteSpace(item.Duration))
+                {
+                    end = item.Duration!; // fallback textual
+                }
+                else
+                {
+                    end = string.Empty;
+                }
+
+                return string.IsNullOrWhiteSpace(end) ? start : $"{start} – {end}";
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Duration)) return item.Duration!;
+            if (item.GraduationYear.HasValue) return $"Diplômé {item.GraduationYear}";
+            return string.Empty;
+        }
+
+        private static string BuildYears(DateTime? start, DateTime? end)
+        {
+            if (start.HasValue && end.HasValue)
+            {
+                var s = start.Value.Year;
+                var e = end.Value.Year;
+                return s == e ? s.ToString() : $"{s} – {e}";
+            }
+            if (start.HasValue) return start.Value.Year.ToString();
+            if (end.HasValue) return end.Value.Year.ToString();
             return string.Empty;
         }
     }
