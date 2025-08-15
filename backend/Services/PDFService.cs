@@ -1,14 +1,10 @@
 using backend.Models;
-using iText.Kernel.Pdf;
-using iText.Layout;
-using iText.Layout.Element;
-using iText.Layout.Properties;
-using iText.Kernel.Colors;
-using iText.IO.Image;
-using iText.Kernel.Geom;
-using iText.Kernel.Font;
-using iText.IO.Font;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
+using QuestPDF.Previewer;
 using System.Linq;
+using static QuestPDF.Infrastructure.IContainer;
 
 namespace backend.Services
 {
@@ -26,305 +22,265 @@ namespace backend.Services
 
         private byte[] GenerateATSCVInternal(CV cv, byte[]? photoData)
         {
-            using var memoryStream = new MemoryStream();
-            var writer = new PdfWriter(memoryStream);
-            var pdf = new PdfDocument(writer);
-            var document = new Document(pdf, PageSize.A4);
+            // Configure QuestPDF
+            QuestPDF.Settings.License = LicenseType.Community;
 
-            // Margins (kept generous for ATS)
-            document.SetMargins(42, 50, 50, 50);
-
-            // Optional: register a readable sans-serif font (falls back to default if not found)
-            try
+            var document = Document.Create(container =>
             {
-                var font = PdfFontFactory.CreateFont("Helvetica");
-                document.SetFont(font);
-            }
-            catch { /* fallback to default */ }
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(20, Unit.Millimetre);
+                    page.DefaultTextStyle(TextStyle.Default.FontSize(11).FontFamily("Segoe UI"));
 
-            // ===== HEADER =====
-            AddHeaderBanner(document, cv.PersonalInfo, photoData);
+                    page.Header().Element(header => BuildHeader(header, cv.PersonalInfo, photoData));
+                    page.Content().Element(content => BuildContent(content, cv));
+                });
+            });
 
-            // ===== SUMMARY (accroche) =====
-            if (!string.IsNullOrWhiteSpace(cv.PersonalInfo.Summary))
+            return document.GeneratePdf();
+        }
+
+        private void BuildHeader(IContainer header, PersonalInfo info, byte[]? photoData)
+        {
+            header.Row(row =>
             {
-                AddSectionTitle(document, "Résumé professionnel");
-                document.Add(new Paragraph(cv.PersonalInfo.Summary)
-                    .SetFontSize(11)
-                    .SetMarginBottom(12));
-            }
+                row.RelativeItem().Column(col =>
+                {
+                    // Name - Large title
+                    col.Item().Text(info.Name).FontSize(20).Bold().LetterSpacing(0.2f);
+                    
+                    // Contact info in two rows
+                    var contactLine1 = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(info.Location)) contactLine1.Add(info.Location);
+                    if (!string.IsNullOrWhiteSpace(info.Email)) contactLine1.Add(info.Email);
+                    
+                    if (contactLine1.Count > 0)
+                    {
+                        col.Item().Text(string.Join("  •  ", contactLine1)).FontSize(10).FontColor("#555");
+                    }
+                    
+                    var contactLine2 = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(info.Phone)) contactLine2.Add(info.Phone);
+                    if (!string.IsNullOrWhiteSpace(info.LinkedIn)) contactLine2.Add(info.LinkedIn);
+                    
+                    if (contactLine2.Count > 0)
+                    {
+                        col.Item().Text(string.Join("  •  ", contactLine2)).FontSize(10).FontColor("#555");
+                    }
+                    
+                    // Summary/tagline
+                    if (!string.IsNullOrWhiteSpace(info.Summary))
+                    {
+                        col.Item().PaddingTop(4).Text(info.Summary).FontSize(10).FontColor("#555");
+                    }
+                });
 
-            // ===== EXPÉRIENCE =====
-            var experiences = cv.TimelineItems
-                .Where(t => t.Type == TimelineItemType.Experience)
+                // Photo on the right if provided
+                if (photoData != null)
+                {
+                    row.ConstantItem(70).Height(88).Image(photoData).FitArea();
+                }
+            });
+            
+            // Bottom border
+            header.BorderBottom(1).BorderColor("#ddd").PaddingBottom(8);
+        }
+
+        private void BuildContent(IContainer content, CV cv)
+        {
+            content.Column(col =>
+            {
+                // Two-column layout
+                col.Item().Row(row =>
+                {
+                    // Left column (1.2fr)
+                    var leftContainer = row.RelativeItem(1.2f).Container();
+                    BuildSkillsSection(leftContainer, cv.Skills);
+                    BuildProjectsSection(leftContainer, cv.TimelineItems);
+                    BuildEducationSection(leftContainer, cv.TimelineItems);
+                        
+
+                    // Right column (2fr)
+                    var rightContainer = row.RelativeItem(2f).Container();
+                    BuildExperienceSection(rightContainer, cv.TimelineItems, cv.Skills);
+                });
+            });
+        }
+
+        private void BuildSkillsSection(IContainer container, List<Skills> skills)
+        {
+            if (skills == null || !skills.Any()) return;
+
+            container.PaddingBottom(10).Column(col =>
+            {
+                col.Item().Text("COMPÉTENCES").FontSize(12).Bold().LetterSpacing(0.5f).LineHeight(2.0f);
+                
+                // Skills as chips
+                var allSkills = skills.SelectMany(s => s.SkillsList ?? new List<string>()).Distinct().ToList();
+                if (allSkills.Any())
+                {
+                    col.Item().Row(row =>
+                    {
+                        var skillsPerRow = 3;
+                        for (int i = 0; i < allSkills.Count; i += skillsPerRow)
+                        {
+                            var rowSkills = allSkills.Skip(i).Take(skillsPerRow).ToList();
+                            row.RelativeItem().Row(skillRow =>
+                            {
+                                foreach (var skill in rowSkills)
+                                {
+                                    skillRow.RelativeItem().PaddingRight(6).PaddingBottom(6).Border(1).BorderColor("#ddd").PaddingHorizontal(6).PaddingVertical(2).Text(skill).FontSize(9.5f);
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        }
+
+        private void BuildProjectsSection(IContainer container, List<TimelineItem> timelineItems)
+        {
+            var projects = timelineItems?.Where(t => t.Type == TimelineItemType.Project)
                 .OrderByDescending(t => t.StartDate ?? DateTime.MinValue)
                 .ToList();
 
-            if (experiences.Any())
+            if (projects == null || !projects.Any()) return;
+
+            container.PaddingBottom(10).Column(col =>
             {
-                AddSectionTitle(document, "Expérience professionnelle");
-                foreach (var exp in experiences)
+                col.Item().Text("PROJETS").FontSize(12).Bold().LetterSpacing(0.5f).LineHeight(2.0f);
+                
+                foreach (var project in projects)
                 {
-                    AddExperienceBlock(document, exp, cv.Skills);
+                    col.Item().PaddingBottom(6).Column(projectCol =>
+                    {
+                        projectCol.Item().Text(project.Title ?? "Projet").FontSize(11.5f).Bold();
+                        if (!string.IsNullOrWhiteSpace(project.Description))
+                        {
+                            projectCol.Item().Text(project.Description).FontSize(10).FontColor("#555");
+                        }
+                    });
                 }
-            }
+            });
+        }
 
-            // ===== PROJETS =====
-            var projects = cv.TimelineItems
-                .Where(t => t.Type == TimelineItemType.Project)
-                .OrderByDescending(t => t.StartDate ?? DateTime.MinValue)
-                .ToList();
-
-            if (projects.Any())
-            {
-                AddSectionTitle(document, "Projets");
-                foreach (var p in projects)
-                {
-                    AddProjectBlock(document, p);
-                }
-            }
-
-            // ===== FORMATION =====
-            var educ = cv.TimelineItems
-                .Where(t => t.Type == TimelineItemType.Education)
+        private void BuildEducationSection(IContainer container, List<TimelineItem> timelineItems)
+        {
+            var education = timelineItems?.Where(t => t.Type == TimelineItemType.Education)
                 .OrderByDescending(t => t.GraduationYear ?? (t.EndDate?.Year ?? (t.StartDate?.Year ?? int.MinValue)))
                 .ToList();
 
-            if (educ.Any())
-            {
-                AddSectionTitle(document, "Formation");
-                foreach (var ed in educ)
-                {
-                    AddEducationBlock(document, ed);
-                }
-            }
+            if (education == null || !education.Any()) return;
 
-            document.Close();
-            return memoryStream.ToArray();
+            container.PaddingBottom(10).Column(col =>
+            {
+                col.Item().Text("FORMATION").FontSize(12).Bold().LetterSpacing(0.5f).LineHeight(2.0f);
+                
+                foreach (var edu in education)
+                {
+                    col.Item().PaddingBottom(6).Column(eduCol =>
+                    {
+                        eduCol.Item().Text(edu.Title ?? "").FontSize(11.5f).Bold();
+                        if (!string.IsNullOrWhiteSpace(edu.Organization))
+                        {
+                            eduCol.Item().Text(edu.Organization).FontSize(10);
+                        }
+                        if (edu.GraduationYear.HasValue)
+                        {
+                            eduCol.Item().Text(edu.GraduationYear.Value.ToString()).FontSize(10).FontColor("#555");
+                        }
+                    });
+                }
+            });
         }
 
-        // ===== Header (Template-like) =====
-        private void AddHeaderBanner(Document document, PersonalInfo info, byte[]? photoData)
+        private void BuildExperienceSection(IContainer container, List<TimelineItem> timelineItems, List<Skills> skills)
         {
-            // Top role title (fixed label – adapt as needed from data)
-            document.Add(new Paragraph("DÉVELOPPEUR FULLSTACK")
-                .SetFontSize(14)
-                .SetTextAlignment(TextAlignment.LEFT)
-                .SetMarginBottom(2));
-
-            // Name big
-            document.Add(new Paragraph(info.Name)
-                .SetFontSize(22)
-                .SetTextAlignment(TextAlignment.LEFT)
-                .SetMarginBottom(8));
-
-            // First contact line: city | email
-            var line1 = new List<string>();
-            if (!string.IsNullOrWhiteSpace(info.Location)) line1.Add(info.Location!);
-            if (!string.IsNullOrWhiteSpace(info.Email)) line1.Add(info.Email!);
-            if (line1.Count > 0)
-            {
-                document.Add(new Paragraph(string.Join("  |  ", line1))
-                    .SetFontSize(10)
-                    .SetTextAlignment(TextAlignment.LEFT)
-                    .SetMarginBottom(2));
-            }
-
-            // Second contact line: website (use LinkedIn if no website) | LinkedIn | phone
-            var line2 = new List<string>();
-            // If you have a Website field later, insert it here. For now we print LinkedIn only once.
-            if (!string.IsNullOrWhiteSpace(info.LinkedIn)) line2.Add(info.LinkedIn!);
-            if (!string.IsNullOrWhiteSpace(info.Phone)) line2.Add(info.Phone!);
-
-            if (line2.Count > 0)
-            {
-                document.Add(new Paragraph(string.Join("  |  ", line2))
-                    .SetFontSize(10)
-                    .SetTextAlignment(TextAlignment.LEFT)
-                    .SetMarginBottom(12));
-            }
-
-            // Optional small photo at the right (kept same as your previous version but placed using float)
-            if (photoData != null)
-            {
-                try
-                {
-                    var imageData = ImageDataFactory.Create(photoData);
-                    var image = new Image(imageData)
-                        .SetWidth(70)
-                        .SetHeight(88)
-                        .SetHorizontalAlignment(HorizontalAlignment.RIGHT);
-                    document.Add(image);
-                }
-                catch { /* ignore on failure for ATS simplicity */ }
-            }
-
-            AddDivider(document);
-        }
-
-        // ===== Blocks =====
-        private void AddExperienceBlock(Document document, TimelineItem item, List<Skills> allSkills)
-        {
-            // Title line: "Rôle | chez ORG | Mois/Année – Présent"
-            var titleParts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(item.Title)) titleParts.Add(item.Title!);
-            if (!string.IsNullOrWhiteSpace(item.Organization)) titleParts.Add($"chez {item.Organization}");
-            var period = BuildPeriod(item);
-            if (!string.IsNullOrWhiteSpace(period)) titleParts.Add(period);
-
-            document.Add(new Paragraph(string.Join("  |  ", titleParts))
-                .SetFontSize(12)
-                .SetMarginTop(6)
-                .SetMarginBottom(4));
-
-            // Optional subtitle
-            if (!string.IsNullOrWhiteSpace(item.Subtitle))
-            {
-                document.Add(new Paragraph(item.Subtitle)
-                    .SetFontSize(11)
-                    .SetMarginBottom(4));
-            }
-
-            // Description
-            if (!string.IsNullOrWhiteSpace(item.Description))
-            {
-                document.Add(new Paragraph(item.Description)
-                    .SetFontSize(11)
-                    .SetMarginBottom(4));
-            }
-
-            // Bullets
-            if (item.BulletPoints != null && item.BulletPoints.Any())
-            {
-                foreach (var b in item.BulletPoints)
-                {
-                    if (string.IsNullOrWhiteSpace(b)) continue;
-                    document.Add(new Paragraph("• " + b)
-                        .SetFontSize(11)
-                        .SetMarginLeft(12)
-                        .SetMarginBottom(2));
-                }
-            }
-
-            // Per-role skills (from many-to-many mapping)
-            var related = allSkills
-                .Where(s => s.RelatedTimelineItems != null && s.RelatedTimelineItems.Any(r => r.Id == item.Id))
+            var experiences = timelineItems?.Where(t => t.Type == TimelineItemType.Experience)
+                .OrderByDescending(t => t.StartDate ?? DateTime.MinValue)
                 .ToList();
 
-            if (related.Any())
-            {
-                // A compact single line per category similar to the template
-                document.Add(new Paragraph("Compétences")
-                    .SetFontSize(11)
-                    .SetMarginTop(6)
-                    .SetMarginBottom(2));
+            if (experiences == null || !experiences.Any()) return;
 
-                foreach (var group in related)
+            container.Column(col =>
+            {
+                col.Item().Text("EXPÉRIENCE").FontSize(12).Bold().LetterSpacing(0.5f).LineHeight(2.0f);
+                
+                foreach (var exp in experiences)
                 {
-                    var skillsText = (group.SkillsList != null && group.SkillsList.Any())
-                        ? string.Join(", ", group.SkillsList)
-                        : string.Empty;
-
-                    document.Add(new Paragraph(skillsText)
-                        .SetFontSize(10)
-                        .SetMarginLeft(12)
-                        .SetMarginBottom(2));
+                    col.Item().PaddingBottom(10).Column(expCol =>
+                    {
+                        // Title with organization and period
+                        var titleParts = new List<string>();
+                        if (!string.IsNullOrWhiteSpace(exp.Title)) titleParts.Add(exp.Title);
+                        if (!string.IsNullOrWhiteSpace(exp.Organization)) titleParts.Add(exp.Organization);
+                        
+                        var period = BuildPeriod(exp);
+                        if (!string.IsNullOrWhiteSpace(period)) titleParts.Add(period);
+                        
+                        expCol.Item().Text(string.Join(" — ", titleParts)).FontSize(11.5f).Bold();
+                        
+                        // Subtitle if available
+                        if (!string.IsNullOrWhiteSpace(exp.Subtitle))
+                        {
+                            expCol.Item().Text(exp.Subtitle).FontSize(10).FontColor("#555");
+                        }
+                        
+                        // Description
+                        if (!string.IsNullOrWhiteSpace(exp.Description))
+                        {
+                            expCol.Item().Text(exp.Description).FontSize(10).LineHeight(2.0f);
+                        }
+                        
+                        // Bullet points
+                        if (exp.BulletPoints != null && exp.BulletPoints.Any())
+                        {
+                            expCol.Item().PaddingLeft(12).Column(bulletCol =>
+                            {
+                                foreach (var bullet in exp.BulletPoints)
+                                {
+                                    if (!string.IsNullOrWhiteSpace(bullet))
+                                    {
+                                        bulletCol.Item().Text($"• {bullet}").FontSize(10).LineHeight(2.0f);
+                                    }
+                                }
+                            });
+                        }
+                        
+                        // Related skills
+                        var relatedSkills = skills?.Where(s => s.RelatedTimelineItems != null && 
+                            s.RelatedTimelineItems.Any(r => r.Id == exp.Id)).ToList();
+                        
+                        if (relatedSkills != null && relatedSkills.Any())
+                        {
+                            expCol.Item().PaddingTop(4).Text("Compétences :").FontSize(10).Bold();
+                            var skillsText = relatedSkills.SelectMany(s => s.SkillsList ?? new List<string>()).Distinct();
+                            expCol.Item().Text(string.Join(", ", skillsText)).FontSize(9).FontColor("#555");
+                        }
+                    });
                 }
-            }
-        }
-
-        private void AddProjectBlock(Document document, TimelineItem item)
-        {
-            // Title line: project name; use organization if present for context
-            var title = !string.IsNullOrWhiteSpace(item.Title) ? item.Title : "Projet";
-            var ctx = !string.IsNullOrWhiteSpace(item.Organization) ? $" – {item.Organization}" : string.Empty;
-            document.Add(new Paragraph(title + ctx)
-                .SetFontSize(12)
-                .SetMarginTop(6)
-                .SetMarginBottom(2));
-
-            if (!string.IsNullOrWhiteSpace(item.Description))
-            {
-                document.Add(new Paragraph(item.Description)
-                    .SetFontSize(11)
-                    .SetMarginBottom(2));
-            }
-
-            if (!string.IsNullOrWhiteSpace(item.Tech))
-            {
-                document.Add(new Paragraph("Technologies : " + item.Tech)
-                    .SetFontSize(10)
-                    .SetMarginBottom(4));
-            }
-        }
-
-        private void AddEducationBlock(Document document, TimelineItem item)
-        {
-            // "Diplôme | École | Années" style
-            var parts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(item.Title)) parts.Add(item.Title!);
-            if (!string.IsNullOrWhiteSpace(item.Organization)) parts.Add(item.Organization!);
-
-            var years = string.Empty;
-            if (item.GraduationYear.HasValue) years = item.GraduationYear.Value.ToString();
-            else if (item.StartDate.HasValue || item.EndDate.HasValue) years = BuildYears(item.StartDate, item.EndDate);
-            if (!string.IsNullOrWhiteSpace(years)) parts.Add(years);
-
-            document.Add(new Paragraph(string.Join("  |  ", parts))
-                .SetFontSize(12)
-                .SetMarginTop(6)
-                .SetMarginBottom(2));
-
-            if (!string.IsNullOrWhiteSpace(item.Subtitle))
-            {
-                document.Add(new Paragraph(item.Subtitle)
-                    .SetFontSize(11)
-                    .SetMarginBottom(2));
-            }
-
-            if (!string.IsNullOrWhiteSpace(item.Grade))
-            {
-                document.Add(new Paragraph("Mention : " + item.Grade)
-                    .SetFontSize(10)
-                    .SetMarginBottom(2));
-            }
-        }
-
-        // ===== Helpers =====
-        private void AddSectionTitle(Document document, string title)
-        {
-            document.Add(new Paragraph(title.ToUpperInvariant())
-                .SetFontSize(13)
-                .SetMarginTop(14)
-                .SetMarginBottom(6));
-            AddDivider(document);
-        }
-
-        private void AddDivider(Document document)
-        {
-            var sep = new LineSeparator(new iText.Kernel.Pdf.Canvas.Draw.SolidLine(0.75f));
-            sep.SetMarginBottom(10);
-            document.Add(sep);
+            });
         }
 
         private static string BuildPeriod(TimelineItem item)
         {
-            // Preferred: Month YYYY – Month YYYY (or Présent)
             if (item.StartDate.HasValue)
             {
-                var start = item.StartDate.Value.ToString("MMMM yyyy");
+                var start = item.StartDate.Value.ToString("MM/yyyy");
                 string end;
+                
                 if (item.IsCurrentPosition)
                 {
-                    end = "Présent";
+                    end = "Actuel";
                 }
                 else if (item.EndDate.HasValue)
                 {
-                    end = item.EndDate.Value.ToString("MMMM yyyy");
+                    end = item.EndDate.Value.ToString("MM/yyyy");
                 }
                 else if (!string.IsNullOrWhiteSpace(item.Duration))
                 {
-                    end = item.Duration!; // fallback textual
+                    end = item.Duration;
                 }
                 else
                 {
@@ -334,21 +290,8 @@ namespace backend.Services
                 return string.IsNullOrWhiteSpace(end) ? start : $"{start} – {end}";
             }
 
-            if (!string.IsNullOrWhiteSpace(item.Duration)) return item.Duration!;
-            if (item.GraduationYear.HasValue) return $"Diplômé {item.GraduationYear}";
-            return string.Empty;
-        }
-
-        private static string BuildYears(DateTime? start, DateTime? end)
-        {
-            if (start.HasValue && end.HasValue)
-            {
-                var s = start.Value.Year;
-                var e = end.Value.Year;
-                return s == e ? s.ToString() : $"{s} – {e}";
-            }
-            if (start.HasValue) return start.Value.Year.ToString();
-            if (end.HasValue) return end.Value.Year.ToString();
+            if (!string.IsNullOrWhiteSpace(item.Duration)) return item.Duration;
+            if (item.GraduationYear.HasValue) return item.GraduationYear.Value.ToString();
             return string.Empty;
         }
     }
