@@ -10,6 +10,11 @@ namespace backend.Services
 {
     public class PDFService : IPDFService
     {
+        static PDFService()
+        {
+            QuestPDF.Settings.License = LicenseType.Community;
+        }
+
         public async Task<byte[]> GenerateATSCVAsync(CV cv)
         {
             return await Task.Run(() => GenerateATSCVInternal(cv, null));
