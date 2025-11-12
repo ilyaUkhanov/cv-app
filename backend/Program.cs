@@ -12,7 +12,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Add PDF Service
-builder.Services.AddScoped<IPDFService, PDFService>();
+// builder.Services.AddScoped<IPDFService, PDFService>();
 
 var app = builder.Build();
 

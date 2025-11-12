@@ -1,25 +1,46 @@
 services:
-  backend:
+  # backend:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile.dev
+  #   ports:
+  #     - "3005:80"
+  #   environment:
+  #     - ASPNETCORE_ENVIRONMENT=Development
+  #     - ASPNETCORE_URLS=http://+:80
+  #     - DOTNET_USE_POLLING_FILE_WATCHER=1
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./backend:/src
+  #     - /src/bin
+  #     - /src/obj
+  #     - nuget_cache:/root/.nuget/packages
+  #   networks:
+  #     - app-network
+  #   restart: unless-stopped
+
+  backend-hotreload:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
-    ports:
-      - "3005:80"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://+:80
-      - DOTNET_USE_POLLING_FILE_WATCHER=1
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ASPNETCORE_URLS=https://*:443;http://*:80
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=123
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/https/aspnetapp.pfx
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      - "3005:80"
     volumes:
       - ./backend:/src
-      - /src/bin
-      - /src/obj
-    networks:
-      - app-network
-    restart: unless-stopped
+      - /src/obj/ # <- directory won't be mounted
+      - /src/bin/ # <- directory won't be mounted
+      - ~/.aspnet/https:/https:ro
 
   postgres:
     image: postgres:15
@@ -42,6 +63,7 @@ services:
 
 volumes:
   postgres_data_dev:
+  nuget_cache:
 
 networks:
   app-network:

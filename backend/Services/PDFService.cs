@@ -1,10 +1,11 @@
-using backend.Models;
+/*using backend.Models;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using QuestPDF.Previewer;
 using System.Linq;
 using static QuestPDF.Infrastructure.IContainer;
+using static QuestPDF.Infrastructure.IColumn;
 
 namespace backend.Services
 {
@@ -100,20 +101,23 @@ namespace backend.Services
                 col.Item().Row(row =>
                 {
                     // Left column (1.2fr)
-                    var leftContainer = row.RelativeItem(1.2f).Container();
-                    BuildSkillsSection(leftContainer, cv.Skills);
-                    BuildProjectsSection(leftContainer, cv.TimelineItems);
-                    BuildEducationSection(leftContainer, cv.TimelineItems);
-                        
+                    row.RelativeItem(1.2f).Column(leftCol =>
+                    {
+                        BuildSkillsSection(leftCol, cv.Skills);
+                        BuildProjectsSection(leftCol, cv.TimelineItems);
+                        BuildEducationSection(leftCol, cv.TimelineItems);
+                    });
 
                     // Right column (2fr)
-                    var rightContainer = row.RelativeItem(2f).Container();
-                    BuildExperienceSection(rightContainer, cv.TimelineItems, cv.Skills);
+                    row.RelativeItem(2f).Column(rightCol =>
+                    {
+                        BuildExperienceSection(rightCol, cv.TimelineItems, cv.Skills);
+                    });
                 });
             });
         }
 
-        private void BuildSkillsSection(IContainer container, List<Skills> skills)
+        private void BuildSkillsSection(IColumn container, List<Skills> skills)
         {
             if (skills == null || !skills.Any()) return;
 
@@ -125,17 +129,22 @@ namespace backend.Services
                 var allSkills = skills.SelectMany(s => s.SkillsList ?? new List<string>()).Distinct().ToList();
                 if (allSkills.Any())
                 {
+                    // Create a single row for all skills
                     col.Item().Row(row =>
                     {
                         var skillsPerRow = 3;
-                        for (int i = 0; i < allSkills.Count; i += skillsPerRow)
+                        var totalRows = (int)Math.Ceiling((double)allSkills.Count / skillsPerRow);
+                        
+                        for (int rowIndex = 0; rowIndex < totalRows; rowIndex++)
                         {
-                            var rowSkills = allSkills.Skip(i).Take(skillsPerRow).ToList();
-                            row.RelativeItem().Row(skillRow =>
+                            var rowSkills = allSkills.Skip(rowIndex * skillsPerRow).Take(skillsPerRow).ToList();
+                            
+                            // Create a column for each row of skills
+                            row.RelativeItem().Column(skillCol =>
                             {
                                 foreach (var skill in rowSkills)
                                 {
-                                    skillRow.RelativeItem().PaddingRight(6).PaddingBottom(6).Border(1).BorderColor("#ddd").PaddingHorizontal(6).PaddingVertical(2).Text(skill).FontSize(9.5f);
+                                    skillCol.Item().PaddingRight(6).PaddingBottom(6).Border(1).BorderColor("#ddd").PaddingHorizontal(6).PaddingVertical(2).Text(skill).FontSize(9.5f);
                                 }
                             });
                         }
@@ -144,13 +153,13 @@ namespace backend.Services
             });
         }
 
-        private void BuildProjectsSection(IContainer container, List<TimelineItem> timelineItems)
+        private void BuildProjectsSection(IColumn container, List<TimelineItem> timelineItems)
         {
             var projects = timelineItems?.Where(t => t.Type == TimelineItemType.Project)
                 .OrderByDescending(t => t.StartDate ?? DateTime.MinValue)
                 .ToList();
 
-            if (projects == null || !projects.Any()) return;
+            if (education == null || !education.Any()) return;
 
             container.PaddingBottom(10).Column(col =>
             {
@@ -170,7 +179,7 @@ namespace backend.Services
             });
         }
 
-        private void BuildEducationSection(IContainer container, List<TimelineItem> timelineItems)
+        private void BuildEducationSection(IColumn container, List<TimelineItem> timelineItems)
         {
             var education = timelineItems?.Where(t => t.Type == TimelineItemType.Education)
                 .OrderByDescending(t => t.GraduationYear ?? (t.EndDate?.Year ?? (t.StartDate?.Year ?? int.MinValue)))
@@ -200,7 +209,7 @@ namespace backend.Services
             });
         }
 
-        private void BuildExperienceSection(IContainer container, List<TimelineItem> timelineItems, List<Skills> skills)
+        private void BuildExperienceSection(IColumn container, List<TimelineItem> timelineItems, List<Skills> skills)
         {
             var experiences = timelineItems?.Where(t => t.Type == TimelineItemType.Experience)
                 .OrderByDescending(t => t.StartDate ?? DateTime.MinValue)
@@ -301,3 +310,4 @@ namespace backend.Services
         }
     }
 }
+*/

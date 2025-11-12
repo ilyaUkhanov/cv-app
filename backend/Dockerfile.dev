@@ -1,13 +1,38 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0
+# FROM mcr.microsoft.com/dotnet/sdk:8.0
+# WORKDIR /src
+
+# # Install EF Core tools
+# RUN dotnet tool install --global dotnet-ef
+
+# # Add tools to PATH
+# ENV PATH="/root/.dotnet/tools:${PATH}"
+
+# EXPOSE 80
+
+# # The source code will be mounted as a volume for hot reload
+# CMD ["dotnet", "watch", "run", "--project", "backend.csproj", "--urls", "http://+:80", "--no-launch-profile"]
+
+##############
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /src
-
-# Install EF Core tools
-RUN dotnet tool install --global dotnet-ef
-
-# Add tools to PATH
-ENV PATH="/root/.dotnet/tools:${PATH}"
-
+EXPOSE 5000
+EXPOSE 5001
 EXPOSE 80
 
-# The source code will be mounted as a volume for hot reload
-CMD ["dotnet", "watch", "run", "--project", "backend.csproj", "--urls", "http://+:80", "--no-launch-profile"]
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY ["backend.csproj", "./"]
+RUN dotnet restore "./backend.csproj"
+COPY . .
+RUN dotnet build "./backend.csproj" -c $BUILD_CONFIGURATION -o /src/build
+
+FROM build AS publish
+ARG BUILD_CONFIGURATION=Release
+RUN dotnet publish "./backend.csproj" -c $BUILD_CONFIGURATION -o /src/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /src
+COPY --from=publish /src/publish .
+# ENTRYPOINT ["dotnet", "backend.dll"]
+ENTRYPOINT ["bin/bash"]
