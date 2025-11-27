@@ -1,0 +1,74 @@
+doctype html
+html
+  head
+    meta(charset="utf-8")
+    title= cv.name + ' - ' + cv.title
+  body
+    // Header
+    header
+      h1= cv.name
+      h2= cv.title
+      p #{cv.location} · #{cv.phone} · 
+        a(href='mailto:' + cv.email)= cv.email
+      if cv.website
+        p
+          a(href=cv.website target="_blank")= cv.website
+      if cv.linkedin
+        p
+          a(href=cv.linkedin target="_blank") LinkedIn
+
+    // Summary
+    if cv.summary
+      section
+        h2 Profil
+        p= cv.summary
+
+    // Skills
+    if cv.skills && cv.skills.length
+      section
+        h2 Compétences
+        each skill in cv.skills
+          h3= skill.category
+          ul
+            each item in skill.items
+              li= item
+
+    // Experience
+    if cv.experience && cv.experience.length
+      section
+        h2 Expérience
+        each job in cv.experience
+          article
+            h3 #{job.title} — #{job.company}
+            p.em #{job.location} · #{job.dates}
+            if job.bullets && job.bullets.length
+              ul
+                each bullet in job.bullets
+                  li= bullet
+
+    // Projects
+    if cv.projects && cv.projects.length
+      section
+        h2 Projets
+        each project in cv.projects
+          article
+            h3= project.title
+            if project.role
+              p.em= project.role
+            if project.bullets && project.bullets.length
+              ul
+                each bullet in project.bullets
+                  li= bullet
+
+    // Education
+    if cv.education && cv.education.length
+      section
+        h2 Formation
+        each edu in cv.education
+          article
+            h3= edu.degree
+            p.em #{edu.school} — #{edu.location} · #{edu.dates}
+            if edu.bullets && edu.bullets.length
+              ul
+                each bullet in edu.bullets
+                  li= bullet
