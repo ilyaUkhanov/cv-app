@@ -5,8 +5,7 @@ import path from 'path';
 
 import fs from 'fs/promises';
 import pug from 'pug';
-import fetch from 'node-fetch';
-import FormData from 'form-data';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -71,6 +70,7 @@ export class Server {
       console.log(`Server running on port ${this.port}`);
     });
   }
+
   /**
    * generateFromTemplate
    *
@@ -79,12 +79,13 @@ export class Server {
    * - Calls Gotenberg to convert that URL into a PDF and returns the PDF
    */
   private generateFromTemplate = async (req: Request, res: Response) => {
-    console.log('TEST', req.params.templateSlug);
     const templateSlug = req.params.templateSlug;
 
     const ENV_APP_URL =
       process.env.ENV_APP_URL || `http://localhost:${this.port}`;
     const ENV_GOTENBERG_URL = process.env.ENV_GOTENBERG_URL;
+
+    console.log('req.body', req.body);
 
     if (!ENV_GOTENBERG_URL) {
       return res
@@ -117,25 +118,12 @@ export class Server {
       console.log('gotenbergEndpoint', gotenbergEndpoint);
       console.log('htmlUrl', htmlUrl);
 
-      const gotenbergResponse = await fetch(gotenbergEndpoint, {
-        method: 'POST',
-        body: form as any,
-        headers: (form as any).getHeaders
-          ? (form as any).getHeaders()
-          : undefined,
+      // Use axios with native FormData
+      const gotenbergResponse = await axios.post(gotenbergEndpoint, form, {
+        responseType: 'arraybuffer',
       });
 
-      if (!gotenbergResponse.ok) {
-        const text = await gotenbergResponse.text().catch(() => '');
-        return res.status(502).json({
-          error: 'Gotenberg conversion failed',
-          status: gotenbergResponse.status,
-          body: text,
-        });
-      }
-
-      const arrayBuffer = await gotenbergResponse.arrayBuffer();
-      const pdfBuffer = Buffer.from(arrayBuffer);
+      const pdfBuffer = Buffer.from(gotenbergResponse.data);
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
