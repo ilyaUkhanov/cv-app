@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: "traefik:v2.10"
+    container_name: traefik
+    restart: always
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
+      - "--certificatesresolvers.mytlschallenge.acme.email=${SSL_EMAIL}"
+      - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - traefik_data:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - app-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    restart: always
+    environment:
+      - PORT=3000
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - ENV_APP_URL=https://backend.${DOMAIN_NAME}
+      - ENV_GOTENBERG_URL=http://gotenberg:3000
+      - NODE_ENV=production
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`backend.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.backend.entrypoints=web,websecure"
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.routers.backend.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.backend.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.backend-headers.headers.SSLRedirect=true"
+      - "traefik.http.middlewares.backend-headers.headers.STSSeconds=315360000"
+      - "traefik.http.middlewares.backend-headers.headers.browserXSSFilter=true"
+      - "traefik.http.middlewares.backend-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.backend-headers.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.backend-headers.headers.SSLHost=${DOMAIN_NAME}"
+      - "traefik.http.middlewares.backend-headers.headers.STSIncludeSubdomains=true"
+      - "traefik.http.middlewares.backend-headers.headers.STSPreload=true"
+      - "traefik.http.routers.backend.middlewares=backend-headers@docker"
+    volumes:
+      - ./backend:/app
+      - backend_node_modules:/app/node_modules
+      - ./backend/src/public:/app/dist/public
+    networks:
+      - app-network
+    depends_on:
+      - traefik
+      - gotenberg
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    restart: always
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`${N8N_SUBDOMAIN}.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.n8n.tls=true"
+      - "traefik.http.routers.n8n.entrypoints=web,websecure"
+      - "traefik.http.routers.n8n.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+      - "traefik.http.middlewares.n8n-headers.headers.SSLRedirect=true"
+      - "traefik.http.middlewares.n8n-headers.headers.STSSeconds=315360000"
+      - "traefik.http.middlewares.n8n-headers.headers.browserXSSFilter=true"
+      - "traefik.http.middlewares.n8n-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.n8n-headers.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.n8n-headers.headers.SSLHost=${DOMAIN_NAME}"
+      - "traefik.http.middlewares.n8n-headers.headers.STSIncludeSubdomains=true"
+      - "traefik.http.middlewares.n8n-headers.headers.STSPreload=true"
+      - "traefik.http.routers.n8n.middlewares=n8n-headers@docker"
+    environment:
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_HOST=${N8N_SUBDOMAIN}.${DOMAIN_NAME}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - N8N_RUNNERS_ENABLED=true
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://${N8N_SUBDOMAIN}.${DOMAIN_NAME}/
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - TZ=${GENERIC_TIMEZONE}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/local-files:/files
+    networks:
+      - app-network
+    depends_on:
+      - traefik
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: gotenberg
+    restart: always
+    networks:
+      - app-network
+
+volumes:
+  n8n_data:
+  traefik_data:
+  backend_node_modules:
+
+networks:
+  app-network:
+    driver: bridge
