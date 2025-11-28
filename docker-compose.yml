@@ -36,8 +36,8 @@ services:
       - PORT=3000
       - SECRET_KEY=${SECRET_KEY}
       - DATABASE_URL=${DATABASE_URL}
-      - ENV_APP_URL=https://backend.${DOMAIN_NAME}
-      - ENV_GOTENBERG_URL=http://gotenberg:3000
+      - ENV_APP_URL=${BACKEND_URL}
+      - ENV_GOTENBERG_URL=${GOTENBERG_URL}
       - NODE_ENV=production
     labels:
       - "traefik.enable=true"
@@ -57,7 +57,7 @@ services:
       - "traefik.http.routers.backend.middlewares=backend-headers@docker"
     volumes:
       - ./backend:/app
-      - backend_node_modules:/app/node_modules
+      - ./backend/node_modules:/app/node_modules
       - ./backend/src/public:/app/dist/public
     networks:
       - app-network
@@ -113,7 +113,6 @@ services:
 volumes:
   n8n_data:
   traefik_data:
-  backend_node_modules:
 
 networks:
   app-network:

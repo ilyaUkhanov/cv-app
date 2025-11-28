@@ -10,7 +10,7 @@ COPY yarn.lock ./
 RUN echo '#!/bin/sh' > /start.sh && \
     echo 'if [ ! -d "node_modules" ] || [ -z "$(ls -A node_modules)" ]; then' >> /start.sh && \
     echo '  echo "Installing dependencies..."' >> /start.sh && \
-    echo '  npm install' >> /start.sh && \
+    echo '  npm install --include=dev' >> /start.sh && \
     echo 'fi' >> /start.sh && \
     echo 'echo "Building TypeScript..."' >> /start.sh && \
     echo 'npm run build' >> /start.sh && \
