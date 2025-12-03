@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import pug from 'pug';
 import axios from 'axios';
+import { CVAdaptationService } from '../services/CVAdaptationService';
 
 dotenv.config();
 
@@ -20,6 +21,7 @@ export class Server {
   private port: number;
   private readonly publicTemplatesDir: string;
   private readonly viewsDir: string;
+  private cvAdaptationService: CVAdaptationService;
 
   /**
    * Server constructor
@@ -39,6 +41,7 @@ export class Server {
 
     this.publicTemplatesDir = path.join(__dirname, '..', 'public', 'templates');
     this.viewsDir = path.join(__dirname, '..', 'views');
+    this.cvAdaptationService = new CVAdaptationService();
 
     this.configureMiddleware();
     this.configureRoutes();
@@ -58,6 +61,9 @@ export class Server {
     );
     this.app.get('/generate/template/:templateSlug', this.generateFromTemplate);
     this.app.get('/templates/:templateSlug', this.serveHTML);
+
+    // CV adaptation workflow endpoint
+    this.app.post('/adapt-cv-workflow', this.adaptCVWorkflow);
   }
 
   /**
@@ -158,6 +164,110 @@ export class Server {
       return res.sendFile(htmlFilePath);
     } catch {
       return res.status(404).send('Generated template not found');
+    }
+  };
+
+  /**
+   * adaptCVWorkflow
+   * POST /adapt-cv-workflow
+   *
+   * Complete workflow that:
+   * 1. Takes CV data and job offer data
+   * 2. Uses OpenAI to adapt the CV to the job offer
+   * 3. Generates a PDF from the adapted CV using the template
+   *
+   * Request body:
+   * {
+   *   cv: CVData,
+   *   jobOffer: JobOfferData,
+   *   sessionId?: string,
+   *   templateSlug?: string
+   * }
+   */
+  private adaptCVWorkflow = async (req: Request, res: Response) => {
+    const {
+      cv,
+      jobOffer,
+      sessionId = 'default',
+      templateSlug = 'test',
+    } = req.body;
+
+    // Validate required fields
+    if (!cv || !jobOffer) {
+      return res.status(400).json({
+        error: 'Missing required fields: cv and jobOffer are required',
+      });
+    }
+
+    try {
+      console.log('Step 1: Adapting CV with OpenAI...');
+
+      // Step 1: Adapt CV using OpenAI
+      const adaptedCV = await this.cvAdaptationService.adaptCV({
+        cv,
+        jobOffer,
+        sessionId,
+      });
+
+      console.log('Step 2: Generating PDF from adapted CV...');
+
+      // Step 2: Generate PDF using the template endpoint logic
+      const ENV_APP_URL =
+        process.env.ENV_APP_URL || `http://localhost:${this.port}`;
+      const ENV_GOTENBERG_URL = process.env.ENV_GOTENBERG_URL;
+
+      if (!ENV_GOTENBERG_URL) {
+        return res
+          .status(500)
+          .json({ error: 'ENV_GOTENBERG_URL must be defined' });
+      }
+
+      // Render the Pug template with the adapted CV
+      const pugPath = path.join(this.viewsDir, `${templateSlug}.pug`);
+      const htmlFromPug = pug.renderFile(pugPath, { cv: adaptedCV });
+
+      // Save HTML to public/templates/[templateSlug].html
+      const htmlFilePath = path.join(
+        this.publicTemplatesDir,
+        `${templateSlug}.html`,
+      );
+
+      await fs.mkdir(path.dirname(htmlFilePath), { recursive: true });
+      await fs.writeFile(htmlFilePath, htmlFromPug, 'utf8');
+
+      // Build URL to the generated HTML
+      const htmlUrl = `${ENV_APP_URL}/templates/${templateSlug}`;
+
+      // Call Gotenberg to convert HTML to PDF
+      const gotenbergEndpoint = `${ENV_GOTENBERG_URL}/forms/chromium/convert/url`;
+      const form = new FormData();
+      form.append('url', htmlUrl);
+
+      console.log('Step 3: Converting HTML to PDF with Gotenberg...');
+      console.log('Gotenberg endpoint:', gotenbergEndpoint);
+      console.log('HTML URL:', htmlUrl);
+
+      const gotenbergResponse = await axios.post(gotenbergEndpoint, form, {
+        responseType: 'arraybuffer',
+      });
+
+      const pdfBuffer = Buffer.from(gotenbergResponse.data);
+
+      // Return the PDF
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="cv-adapted-${Date.now()}.pdf"`,
+      );
+
+      console.log('Workflow completed successfully!');
+      return res.send(pdfBuffer);
+    } catch (err: any) {
+      console.error('adaptCVWorkflow error:', err);
+      return res.status(500).json({
+        error: 'Failed to complete CV adaptation workflow',
+        details: err?.message ?? String(err),
+      });
     }
   };
 }
